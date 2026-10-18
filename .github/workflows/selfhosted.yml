@@ -1,0 +1,32 @@
+name: selfhosted
+on:
+  push:
+    branches: [main]
+    paths-ignore: ['**.md']
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  vm:
+    runs-on: [self-hosted, lab]
+    steps:
+      - uses: actions/checkout@v4
+      - run: |
+          uname -m
+          docker version --format 'docker {{.Server.Version}}'
+          hostnamectl --static
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - run: |
+          CGO_ENABLED=0 go build -o ladder-app .
+          file ladder-app || true
+          timeout 1 ./ladder-app || true
+  arc:
+    runs-on: arc-lab
+    steps:
+      - run: |
+          uname -m
+          cat /etc/hostname
+          head -3 /proc/1/cgroup
+          env | grep -E '^RUNNER_' | sort
