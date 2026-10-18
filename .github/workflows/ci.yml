@@ -11,26 +11,12 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 jobs:
-  test:
-    runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        go: ['1.26.x', '1.27.x']
-    steps:
-      - uses: actions/checkout@v4          # v4.2.2
-      - uses: actions/setup-go@v5          # v5.5.0
-        with:
-          go-version: ${{ matrix.go }}
-          cache: true
-      - run: go vet ./...
-      - run: go test -race -coverprofile=cover.out ./...
-      - uses: actions/upload-artifact@v4   # v4.6.2
-        with:
-          name: coverage-${{ matrix.go }}
-          path: cover.out
+  quality:
+    uses: ./.github/workflows/go-checks.yml
+    with:
+      coverage-min: 70
   build:
-    needs: test
+    needs: quality
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -42,13 +28,8 @@ jobs:
         run: |
           SHORT=${GITHUB_SHA::7}
           CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -trimpath \
-            -ldflags "-s -w -X main.version=sha-$SHORT -X main.commit=$GITHUB_SHA -X main.date=$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
-            -o ladder-app .
-          {
-            echo "| field | value |"; echo "|---|---|"
-            echo "| version | sha-$SHORT |"; echo "| commit | $GITHUB_SHA |"
-            echo "| size | $(stat -c %s ladder-app) bytes |"
-          } >> "$GITHUB_STEP_SUMMARY"
+            -ldflags "-s -w -X main.version=sha-$SHORT -X main.commit=$GITHUB_SHA" -o ladder-app .
+          echo "| version | sha-$SHORT |" >> "$GITHUB_STEP_SUMMARY"
       - uses: actions/upload-artifact@v4
         with:
           name: ladder-app-linux-arm64

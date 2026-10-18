@@ -1,0 +1,23 @@
+name: coverage gate
+description: Fail when total statement coverage from a Go cover profile is below a minimum.
+inputs:
+  profile:
+    description: cover profile path
+    default: cover.out
+  min:
+    description: minimum total coverage (percent)
+    default: "70"
+outputs:
+  total:
+    description: total coverage percent
+    value: ${{ steps.calc.outputs.total }}
+runs:
+  using: composite
+  steps:
+    - id: calc
+      shell: bash
+      run: |
+        total=$(go tool cover -func="${{ inputs.profile }}" | tail -1 | awk '{print $3}' | tr -d '%')
+        echo "total=$total" >> "$GITHUB_OUTPUT"
+        echo "coverage: ${total}% (minimum ${{ inputs.min }}%)" >> "$GITHUB_STEP_SUMMARY"
+        awk -v t="$total" -v m="${{ inputs.min }}" 'BEGIN{ if (t+0 < m+0) { print "coverage " t "% below minimum " m "%"; exit 1 } }'
