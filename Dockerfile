@@ -18,6 +18,6 @@ LABEL org.opencontainers.image.title="ladder-app" \
       org.opencontainers.image.revision="$COMMIT" \
       org.opencontainers.image.created="$DATE"
 COPY --from=build /out/ladder-app /ladder-app
-USER nonroot:nonroot
+USER 65532:65532
 EXPOSE 8080
 ENTRYPOINT ["/ladder-app"]
