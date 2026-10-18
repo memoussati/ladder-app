@@ -10,7 +10,7 @@ jobs:
   vm:
     runs-on: [self-hosted, lab]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - run: |
           uname -m
           docker version --format 'docker {{.Server.Version}}'
