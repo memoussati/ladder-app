@@ -1,0 +1,36 @@
+name: promote-dev
+# After a successful image build on main, bump the dev overlay in ladder-deploy. Argo CD does the rest.
+on:
+  workflow_run:
+    workflows: [image]
+    types: [completed]
+    branches: [main]
+permissions:
+  contents: read
+jobs:
+  promote:
+    if: ${{ github.event.workflow_run.conclusion == 'success' }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: clone ladder-deploy with the deploy key
+        env:
+          DEPLOY_KEY: ${{ secrets.DEPLOY_KEY }}
+        run: |
+          umask 077; mkdir -p ~/.ssh; printf '%s\n' "$DEPLOY_KEY" > ~/.ssh/deploy_key
+          ssh-keyscan github.com >> ~/.ssh/known_hosts 2>/dev/null
+          export GIT_SSH_COMMAND="ssh -i ~/.ssh/deploy_key -o IdentitiesOnly=yes"
+          git clone -q git@github.com:${{ github.repository_owner }}/ladder-deploy.git deploy
+      - uses: imranismail/setup-kustomize@v2     # v2.1.0
+      - name: set dev image tag
+        env:
+          SHA: ${{ github.event.workflow_run.head_sha }}
+        run: |
+          cd deploy/apps/ladder-app/overlays/dev
+          kustomize edit set image ghcr.io/${{ github.repository }}=ghcr.io/${{ github.repository }}:sha-${SHA::7}
+          cd ../../../..
+          git config user.name "ladder-ci[bot]"; git config user.email "ladder-ci@users.noreply.github.com"
+          git add -A
+          git diff --cached --quiet && { echo "dev already at sha-${SHA::7}"; exit 0; }
+          git commit -q -m "chore(dev): ladder-app sha-${SHA::7}" -m "Source: ${{ github.event.workflow_run.html_url }}"
+          GIT_SSH_COMMAND="ssh -i ~/.ssh/deploy_key -o IdentitiesOnly=yes" git push -q origin HEAD:main
+          echo "dev -> sha-${SHA::7}" >> "$GITHUB_STEP_SUMMARY"
