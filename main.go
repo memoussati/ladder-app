@@ -52,7 +52,6 @@ func newMux() *http.ServeMux {
 			http.Error(w, "injected failure", http.StatusInternalServerError)
 			return
 		}
-		w.Header().Set("X-Ladder-Version", version)
 		_, _ = w.Write([]byte("hello from ladder-app " + version + "\n"))
 	})
 	return mux
