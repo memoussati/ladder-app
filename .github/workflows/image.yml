@@ -18,7 +18,7 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
-      packages: write
+      packages: read
       id-token: write        # keyless signing + provenance
       attestations: write    # GitHub attestation store
     outputs:
