@@ -1,0 +1,63 @@
+name: promote-prod
+# A release tag was built, scanned, signed and attested by `image`. Verify that evidence again from
+# the outside (never trust the build job's own word), then move prod to the new version in Git.
+on:
+  workflow_run:
+    workflows: [image]
+    types: [completed]
+permissions:
+  contents: read
+  packages: read
+  attestations: read
+jobs:
+  promote:
+    if: >-
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.event == 'push' &&
+      startsWith(github.event.workflow_run.head_branch, 'v')
+    runs-on: ubuntu-latest
+    env:
+      TAG: ${{ github.event.workflow_run.head_branch }}
+      IMAGE: ghcr.io/${{ github.repository }}
+    steps:
+      - uses: sigstore/cosign-installer@v4.1.2
+        with:
+          cosign-release: v3.1.3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: verify signature, SBOM and provenance of the release image
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          V=${TAG#v}
+          ID="https://github.com/${{ github.repository }}/.github/workflows/image.yml@refs/tags/$TAG"
+          ISS=https://token.actions.githubusercontent.com
+          DIGEST=$(docker buildx imagetools inspect "$IMAGE:$V" --format '{{json .Manifest}}' | jq -r .digest)
+          cosign verify --certificate-identity "$ID" --certificate-oidc-issuer "$ISS" "$IMAGE@$DIGEST" > /dev/null
+          cosign verify-attestation --type spdxjson --certificate-identity "$ID" --certificate-oidc-issuer "$ISS" "$IMAGE@$DIGEST" > /dev/null
+          gh attestation verify "oci://$IMAGE@$DIGEST" --owner "${{ github.repository_owner }}" --signer-workflow "${{ github.repository }}/.github/workflows/image.yml" > /dev/null
+          echo "DIGEST=$DIGEST" >> "$GITHUB_ENV"
+          { echo "### verified $IMAGE:$V"; echo "- digest \`$DIGEST\`"; echo "- signer \`$ID\`"; echo "- SPDX SBOM and SLSA provenance verified"; } >> "$GITHUB_STEP_SUMMARY"
+      - name: clone ladder-deploy with the deploy key
+        env:
+          DEPLOY_KEY: ${{ secrets.DEPLOY_KEY }}
+        run: |
+          umask 077; mkdir -p ~/.ssh; printf '%s\n' "$DEPLOY_KEY" > ~/.ssh/deploy_key
+          ssh-keyscan github.com >> ~/.ssh/known_hosts 2>/dev/null
+          GIT_SSH_COMMAND="ssh -i ~/.ssh/deploy_key -o IdentitiesOnly=yes" git clone -q git@github.com:${{ github.repository_owner }}/ladder-deploy.git deploy
+      - uses: imranismail/setup-kustomize@v2
+      - name: move prod to the release
+        run: |
+          V=${TAG#v}
+          cd deploy/apps/ladder-app/overlays/prod
+          kustomize edit set image "$IMAGE=$IMAGE:$V"
+          cd ../../../..
+          git config user.name "ladder-ci[bot]"; git config user.email "ladder-ci@users.noreply.github.com"
+          git add -A
+          git diff --cached --quiet && { echo "prod already at $V"; exit 0; }
+          git commit -q -m "chore(prod): ladder-app $TAG" -m "Image: $IMAGE@$DIGEST" -m "Verified by: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          GIT_SSH_COMMAND="ssh -i ~/.ssh/deploy_key -o IdentitiesOnly=yes" git push -q origin HEAD:main
+          echo "prod -> $V" >> "$GITHUB_STEP_SUMMARY"
