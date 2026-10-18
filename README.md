@@ -17,3 +17,6 @@ arbitrary commands on our machines, with network access to the lab cluster.
 - Repository setting *Actions → Fork pull request workflows from outside collaborators* is set to
   "Require approval for all outside collaborators".
 - Hosted runners (`ubuntu-latest`) handle `pull_request` jobs; they are disposable.
+- Secret masking replaces known secret values with `***` in logs, but any transformation
+  (`base64`, `rev`, splitting, URL-encoding) defeats it; masking is a convenience against accidents,
+  not a security control. Treat anything printed in a job as public.

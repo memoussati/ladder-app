@@ -1,0 +1,45 @@
+name: deploy-lab
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: image tag to roll out to ex08
+        default: "0.1.0"
+permissions: {}
+jobs:
+  oidc:
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+    steps:
+      - name: read our own OIDC token
+        run: |
+          tok=$(curl -sS -H "Authorization: bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" "$ACTIONS_ID_TOKEN_REQUEST_URL&audience=ladder" | jq -r .value)
+          payload=$(cut -d. -f2 <<<"$tok" | tr '_-' '/+'); pad=$(( (4 - ${#payload} % 4) % 4 )); payload="$payload$(printf '=%.0s' $(seq 1 $pad))"
+          claims=$(base64 -d <<<"$payload" | jq '{iss, sub, aud, repository, ref, job_workflow_ref, runner_environment, exp}')
+          { echo "### OIDC claims"; echo '```json'; echo "$claims"; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+          echo "$claims"
+  deploy:
+    needs: oidc
+    runs-on: [self-hosted, lab]
+    environment: lab
+    permissions:
+      contents: read
+    steps:
+      - name: roll out ${{ inputs.tag }} with the ci-deployer kubeconfig
+        env:
+          KUBECONFIG_DATA: ${{ secrets.LAB_KUBECONFIG }}
+          IMAGE: ghcr.io/${{ github.repository }}:${{ inputs.tag }}
+        run: |
+          umask 077; export KUBECONFIG=$RUNNER_TEMP/kubeconfig
+          printf '%s' "$KUBECONFIG_DATA" > "$KUBECONFIG"
+          kubectl set image deploy/ladder-app -n ex08 "app=$IMAGE"
+          kubectl rollout status deploy/ladder-app -n ex08 --timeout=180s
+          echo "ex08 now runs $IMAGE" >> "$GITHUB_STEP_SUMMARY"
+      - name: masking drill (masked vs not masked)
+        env: { K: "${{ secrets.LAB_KUBECONFIG }}" }
+        run: |
+          echo "plain first bytes: $(printf '%s' "$K" | head -c 12)"      # masked (***)
+          echo "base64 first bytes: $(printf '%s' "$K" | head -c 12 | base64)"  # NOT masked
+      - if: always()
+        run: rm -f "$RUNNER_TEMP/kubeconfig"
