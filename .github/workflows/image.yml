@@ -51,7 +51,7 @@ jobs:
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           build-args: |
-            VERSION=sha-${{ steps.vars.outputs.short }}
+            VERSION=${{ github.ref_type == 'tag' && github.ref_name || format('sha-{0}', steps.vars.outputs.short) }}
             COMMIT=${{ github.sha }}
             DATE=${{ steps.vars.outputs.date }}
           cache-from: type=gha

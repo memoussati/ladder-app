@@ -1,0 +1,40 @@
+name: release
+on:
+  push:
+    tags: ['v*']
+permissions:
+  contents: read
+jobs:
+  goreleaser:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - uses: goreleaser/goreleaser-action@v6     # v6.3.0
+        with:
+          version: '~> v2'
+          args: release --clean
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+  chart:
+    runs-on: ubuntu-latest
+    permissions:
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: azure/setup-helm@v4                  # v4.3.0
+      - id: v
+        run: echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+      - run: echo "${{ secrets.GITHUB_TOKEN }}" | helm registry login ghcr.io -u "${{ github.actor }}" --password-stdin
+      - run: |
+          helm lint charts/ladder-app
+          helm package charts/ladder-app --version "${{ steps.v.outputs.version }}" --app-version "${{ steps.v.outputs.version }}"
+          helm push "ladder-app-${{ steps.v.outputs.version }}.tgz" "oci://ghcr.io/${{ github.repository_owner }}/charts"
+          echo "chart oci://ghcr.io/${{ github.repository_owner }}/charts/ladder-app:${{ steps.v.outputs.version }}" >> "$GITHUB_STEP_SUMMARY"

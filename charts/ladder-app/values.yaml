@@ -1,0 +1,12 @@
+replicaCount: 1
+image:
+  repository: ghcr.io/memoussati/ladder-app
+  tag: ""          # defaults to .Chart.AppVersion
+  pullPolicy: IfNotPresent
+imagePullSecrets: []
+env: []            # - { name: LADDER_FAIL_RATE, value: "0" }
+service:
+  port: 80
+resources:
+  requests: { cpu: 10m, memory: 16Mi }
+  limits: { memory: 64Mi }
