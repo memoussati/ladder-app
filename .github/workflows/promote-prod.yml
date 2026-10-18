@@ -1,4 +1,6 @@
 name: promote-prod
+# workflow_run runs always report the default branch; put the tag in the run name so you can find it
+run-name: promote-prod ${{ github.event.workflow_run.head_branch }}
 # A release tag was built, scanned, signed and attested by `image`. Verify that evidence again from
 # the outside (never trust the build job's own word), then move prod to the new version in Git.
 on:
