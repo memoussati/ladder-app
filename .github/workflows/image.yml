@@ -6,7 +6,6 @@ on:
     paths-ignore: ['**.md']
 permissions:
   contents: read
-  packages: write
 jobs:
   hadolint:
     runs-on: ubuntu-latest
@@ -17,13 +16,18 @@ jobs:
           dockerfile: Dockerfile
   image:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+      id-token: write        # keyless signing + provenance
+      attestations: write    # GitHub attestation store
     outputs:
       digest: ${{ steps.build.outputs.digest }}
     steps:
       - uses: actions/checkout@v4
-      - uses: docker/setup-qemu-action@v3       # v3.6.0
-      - uses: docker/setup-buildx-action@v3     # v3.11.1
-      - uses: docker/login-action@v3            # v3.4.0
+      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
@@ -33,7 +37,7 @@ jobs:
           echo "short=${GITHUB_SHA::7}" >> "$GITHUB_OUTPUT"
           echo "date=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_OUTPUT"
       - id: meta
-        uses: docker/metadata-action@v5         # v5.7.0
+        uses: docker/metadata-action@v5
         with:
           images: ghcr.io/${{ github.repository }}
           tags: |
@@ -42,7 +46,7 @@ jobs:
             type=semver,pattern={{version}}
             type=raw,value=latest,enable={{is_default_branch}}
       - id: build
-        uses: docker/build-push-action@v6       # v6.18.0
+        uses: docker/build-push-action@v6
         with:
           context: .
           platforms: linux/amd64,linux/arm64
@@ -56,5 +60,35 @@ jobs:
             DATE=${{ steps.vars.outputs.date }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
+      # --- gate: scan the pushed digest; nothing below runs if a critical CVE is found
+      - name: vulnerability scan (gate)
+        uses: anchore/scan-action@v6            # v6.5.1
+        with:
+          image: ghcr.io/${{ github.repository }}@${{ steps.build.outputs.digest }}
+          fail-build: true
+          severity-cutoff: critical
+          output-format: table
+      - name: SBOM (SPDX)
+        uses: anchore/sbom-action@v0            # v0.20.x
+        with:
+          image: ghcr.io/${{ github.repository }}@${{ steps.build.outputs.digest }}
+          format: spdx-json
+          output-file: sbom.spdx.json
+          upload-artifact: true
+          artifact-name: sbom.spdx.json
+      - uses: sigstore/cosign-installer@v3       # v3.9.x
+      - name: sign and attest (keyless)
+        env:
+          REF: ghcr.io/${{ github.repository }}@${{ steps.build.outputs.digest }}
+        run: |
+          cosign sign --yes "$REF"
+          cosign attest --yes --type spdxjson --predicate sbom.spdx.json "$REF"
+      - name: SLSA provenance
+        uses: actions/attest-build-provenance@v3 # v3.0.0
+        with:
+          subject-name: ghcr.io/${{ github.repository }}
+          subject-digest: ${{ steps.build.outputs.digest }}
+          push-to-registry: true
       - run: |
-          { echo "### image"; echo '```'; echo "${{ steps.meta.outputs.tags }}"; echo "digest ${{ steps.build.outputs.digest }}"; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+          { echo "### image"; echo '```'; echo "${{ steps.meta.outputs.tags }}"; echo "digest ${{ steps.build.outputs.digest }}"; echo '```'
+            echo "signed, SBOM attested, provenance attested (keyless)"; } >> "$GITHUB_STEP_SUMMARY"
