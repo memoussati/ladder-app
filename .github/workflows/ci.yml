@@ -16,7 +16,7 @@ jobs:
     with:
       coverage-min: 70
   build:
-    needs: qualty
+    needs: quality
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
