@@ -1,0 +1,27 @@
+name: tekton-bridge
+# The lab cannot receive GitHub webhooks, so the self-hosted runner (inside the lab network)
+# forwards a signed GitHub-style push event to the Tekton EventListener.
+on:
+  push:
+    branches: [main]
+    paths-ignore: ['**.md']
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  forward:
+    runs-on: [self-hosted, lab]
+    steps:
+      - name: forward push event to Tekton
+        env:
+          SECRET: ${{ secrets.TEKTON_WEBHOOK_SECRET }}
+          REPO: ${{ github.repository }}
+          SHA: ${{ github.sha }}
+        run: |
+          body=$(jq -cn --arg r "$REPO" --arg s "$SHA" '{ref: "refs/heads/main", after: $s, repository: {full_name: $r, clone_url: ("https://github.com/" + $r + ".git")}}')
+          sig=$(printf '%s' "$body" | openssl dgst -sha256 -hmac "$SECRET" | awk '{print $NF}')
+          code=$(curl -s -o /tmp/el.json -w '%{http_code}' -X POST http://192.168.64.251:30090 \
+            -H 'Content-Type: application/json' -H 'X-GitHub-Event: push' -H "X-Hub-Signature-256: sha256=$sig" -d "$body")
+          cat /tmp/el.json; echo
+          echo "EventListener answered $code" >> "$GITHUB_STEP_SUMMARY"
+          [ "$code" = 202 ]
